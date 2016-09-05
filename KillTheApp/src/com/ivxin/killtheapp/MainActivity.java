@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
@@ -148,7 +149,9 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 		public void run() {
 			List<ProcessEntity> processList = new ArrayList<ProcessEntity>();
 			try {
-				Process process = Runtime.getRuntime().exec("ps grep " + packageName);
+				// Process process = Runtime.getRuntime().exec("ps grep " +
+				// packageName);
+				Process process = Runtime.getRuntime().exec("ps");
 				process.waitFor();
 				InputStream inputStream = process.getInputStream();
 				BufferedReader read = new BufferedReader(new InputStreamReader(inputStream));
@@ -165,18 +168,19 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 							list.add(colums[i]);
 						}
 					}
-					if (!list.get(0).equals("USER")) {
-						entity.setUSER(list.get(0));
-						entity.setPID(list.get(1));
-						entity.setPPID(list.get(2));
-						entity.setVSIZE(list.get(3));
-						entity.setRSS(list.get(4));
-						entity.setWCHAN(list.get(5));
-						entity.setPC(list.get(6) + list.get(7));
-						entity.setNAME(list.get(8));
-						processList.add(entity);
-						System.out.println("PID:" + entity.getPID());
-					}
+					if (!"USER".equals(list.get(0)))
+						if (list.get(8).contains(packageName)) {
+							entity.setUSER(list.get(0));
+							entity.setPID(list.get(1));
+							entity.setPPID(list.get(2));
+							entity.setVSIZE(list.get(3));
+							entity.setRSS(list.get(4));
+							entity.setWCHAN(list.get(5));
+							entity.setPC(list.get(6) + list.get(7));
+							entity.setNAME(list.get(8));
+							processList.add(entity);
+							System.out.println("PID:" + entity.getPID());
+						}
 				}
 				if (processList.size() > 0) {
 					Message msg = handler.obtainMessage();
@@ -204,6 +208,9 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 		@Override
 		public void run() {
 			try {
+				ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+				manager.killBackgroundProcesses(packageName);
+
 				Thread.sleep(500);
 				for (ProcessEntity entity : processList) {
 					Process process = Runtime.getRuntime().exec("su && kill -9 " + entity.getPID());
