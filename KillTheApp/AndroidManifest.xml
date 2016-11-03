@@ -17,7 +17,7 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:label="KillTheApp"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar" >
+        android:theme="@android:style/Theme.Holo.Light.NoActionBar" >
         <activity
             android:name=".MainActivity"
             android:label="KillTheApp"
