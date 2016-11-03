@@ -8,13 +8,20 @@ import java.util.List;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.AlertDialog;
+import android.app.AlertDialog.Builder;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.text.TextUtils;
+import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.View.OnLongClickListener;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
@@ -32,6 +39,7 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 	private static final int NOT_RUNNING = 0, CHECKOVER = 1, KILLED = 2, FINISH = 3;
 	private String packageName;
 	private boolean autoFinish;
+	private boolean checkAgain = true;
 	private SharedPreferences sp;
 	private EditText et_package_name;
 	private TextView tv_log;
@@ -39,15 +47,20 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 	private ToggleButton tb_confirm;
 	private ScrollView sv;
 	private CheckBox cb_auto_finish;
+	private ActivityManager manager;
+	private List<ProcessEntity> allProcessList = new ArrayList<ProcessEntity>();
+	private List<ProcessEntity> processListToKill = new ArrayList<ProcessEntity>();
+	private List<String> resultList = new ArrayList<String>();
 	private Handler handler = new Handler() {
 		public void handleMessage(android.os.Message msg) {
 			switch (msg.what) {
 			case CHECKOVER:
-				List<ProcessEntity> processList = (List<ProcessEntity>) msg.obj;
-				for (ProcessEntity entity : processList) {
+				checkAgain = true;
+				processListToKill = (List<ProcessEntity>) msg.obj;
+				for (ProcessEntity entity : processListToKill) {
 					appendLog("find pid:" + entity.getPID() + " " + entity.getNAME());
 				}
-				new Thread(new KillAPPTask(processList)).start();
+				new Thread(new KillAPPTask(processListToKill)).start();
 				break;
 			case KILLED:
 				ProcessEntity entity = (ProcessEntity) msg.obj;
@@ -56,6 +69,10 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 			case NOT_RUNNING:
 				appendLog(packageName + " not running.");
 			case FINISH:
+				if (checkAgain) {
+					checkAgain = false;
+					new Thread(new KillAPPTask(processListToKill)).start();
+				}
 				if (cb_auto_finish.isChecked()) {
 					appendLog("finish()...");
 					finish();
@@ -72,6 +89,7 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 		sp = getSharedPreferences("config", MODE_PRIVATE);
+		manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
 		initView();
 	}
 
@@ -91,7 +109,27 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 		btn_kill.setText("KILL " + packageName);
 		autoFinish = cb_auto_finish.isChecked();
 		et_package_name.setEnabled(!tb_confirm.isChecked());
-
+		et_package_name.setOnLongClickListener(new OnLongClickListener() {
+			@Override
+			public boolean onLongClick(View v) {
+				AlertDialog.Builder builder = new Builder(MainActivity.this);
+				TextView customTitleView = new TextView(MainActivity.this);
+				customTitleView.setTextSize(8f);
+				customTitleView.setMovementMethod(ScrollingMovementMethod.getInstance());
+				for (String string : resultList) {
+					customTitleView.append(string + "\n\n");
+				}
+				builder.setCustomTitle(customTitleView);
+				builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						dialog.dismiss();
+					}
+				});
+				builder.show();
+				return true;
+			}
+		});
 		cb_auto_finish.setOnCheckedChangeListener(this);
 		tb_confirm.setOnCheckedChangeListener(this);
 		btn_kill.setOnClickListener(this);
@@ -133,6 +171,7 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 		handler.postDelayed(new Runnable() {
 			@Override
 			public void run() {
+				manager.killBackgroundProcesses(packageName);
 				MainActivity.super.finish();
 			}
 		}, 1000);
@@ -147,6 +186,8 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 
 		@Override
 		public void run() {
+			resultList.clear();
+			allProcessList.clear();
 			List<ProcessEntity> processList = new ArrayList<ProcessEntity>();
 			try {
 				// Process process = Runtime.getRuntime().exec("ps grep " +
@@ -160,6 +201,7 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 				ProcessEntity entity;
 				while ((result = read.readLine()) != null) {
 					System.out.println(result);
+					resultList.add(result);
 					list = new ArrayList<String>();
 					entity = new ProcessEntity();
 					String[] colums = result.split(" ");
@@ -168,19 +210,21 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 							list.add(colums[i]);
 						}
 					}
-					if (!"USER".equals(list.get(0)))
+					if (!"USER".equals(list.get(0)) && list.size() > 8) {
+						entity.setUSER(list.get(0));
+						entity.setPID(list.get(1));
+						entity.setPPID(list.get(2));
+						entity.setVSIZE(list.get(3));
+						entity.setRSS(list.get(4));
+						entity.setWCHAN(list.get(5));
+						entity.setPC(list.get(6) + list.get(7));
+						entity.setNAME(list.get(8));
+						allProcessList.add(entity);
 						if (list.get(8).contains(packageName)) {
-							entity.setUSER(list.get(0));
-							entity.setPID(list.get(1));
-							entity.setPPID(list.get(2));
-							entity.setVSIZE(list.get(3));
-							entity.setRSS(list.get(4));
-							entity.setWCHAN(list.get(5));
-							entity.setPC(list.get(6) + list.get(7));
-							entity.setNAME(list.get(8));
 							processList.add(entity);
 							System.out.println("PID:" + entity.getPID());
 						}
+					}
 				}
 				if (processList.size() > 0) {
 					Message msg = handler.obtainMessage();
@@ -208,12 +252,12 @@ public class MainActivity extends Activity implements OnClickListener, OnChecked
 		@Override
 		public void run() {
 			try {
-				ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
 				manager.killBackgroundProcesses(packageName);
-
 				Thread.sleep(500);
 				for (ProcessEntity entity : processList) {
-					Process process = Runtime.getRuntime().exec("su && kill -9 " + entity.getPID());
+					String exe = "su && kill -9 " + entity.getPID();
+					System.out.println(exe);
+					Process process = Runtime.getRuntime().exec(exe);
 					process.waitFor();
 					InputStream inputStream = process.getInputStream();
 					BufferedReader read = new BufferedReader(new InputStreamReader(inputStream));
